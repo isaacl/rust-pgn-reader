@@ -20,6 +20,8 @@ use std::fs::File;
 struct Counter {
     avail: [[u32; 64]; 6],
     hits: [[u32; 64]; 6],
+    s_avail: [[u32; 64]; 6],
+    s_hits: [[u32; 64]; 6],
     pos: Chess,
     skip: bool
 }
@@ -29,15 +31,17 @@ impl Counter {
         Counter {
             avail: [[0u32; 64]; 6],
             hits: [[0u32; 64]; 6],
+            s_avail: [[0u32; 64]; 6],
+            s_hits: [[0u32; 64]; 6],
             pos: Chess::default(),
             skip: false
         }
     }
 
-    fn print_probs(&self) {
+    fn print_arr(&self, hits: [[u32; 64]; 6], totals: [[u32; 64]; 6]) {
         println!("[");
         for i in 0..6 {
-            let mut probs = self.hits[i].iter().zip(self.avail[i].iter()).map(|(u, v)|
+            let mut probs = hits[i].iter().zip(totals[i].iter()).map(|(u, v)|
                 if *u == 0 { 0 } else { (1000 * *u) / *v });
 
             let mut print_elt = || { print!("{:3}", probs.next().unwrap()) };
@@ -50,6 +54,16 @@ impl Counter {
             if i != 5 { println!("],\n") }
         }
         println!("]\n]");
+    }
+
+    fn print_probs(&self) {
+        self.print_arr(self.hits, self.avail);
+        println!("source probs");
+        self.print_arr(self.s_hits, self.s_avail);
+    }
+
+    fn fix_sq(&self, sq: Square) -> Square {
+        if self.pos.turn().is_white() { sq.flip_vertical() } else { sq }
     }
 }
 
@@ -79,23 +93,21 @@ impl<'pgn> Visitor<'pgn> for Counter {
         if !self.skip {
             let mut legals = MoveList::new();
             self.pos.legal_moves(&mut legals);
-            if legals.len() == 1 {
-                let m = legals.first().unwrap();
-                self.pos.play_unchecked(&m);
-                if !san.matches(m) {
-                    eprintln!("illegal san: {}, not found", san);
-                    self.skip = true;
-                }
-                return;
-            }
+
+
+            let ignore = legals.len() == 1;
 
             let mut found = false;
 
             for m in legals {
-                let dest = if self.pos.turn().is_white() { m.to().flip_vertical() } else { m.to() } as usize;
+                let dest = self.fix_sq(m.to()) as usize;
+                let src = self.fix_sq(m.from().unwrap()) as usize;
 
                 let role = m.role() as usize;
-                self.avail[role][dest] += 1;
+                if !ignore && !m.is_castle() {
+                    self.avail[role][dest] += 1;
+                    self.s_avail[role][src] += 1;
+                }
                 if san.matches(&m) {
                     if found {
                         eprintln!("illegal san: {}, dupe move", san);
@@ -103,10 +115,14 @@ impl<'pgn> Visitor<'pgn> for Counter {
                         return;
                     } else {
                         found = true;
-                        self.hits[role][dest] += 1;
+                        if !ignore && !m.is_castle() {
+                            self.hits[role][dest] += 1;
+                            self.s_hits[role][src] += 1;
+                        }
                         self.pos.play_unchecked(&m);
                     }
                 }
+
             }
 
             if !found {

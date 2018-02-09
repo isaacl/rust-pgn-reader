@@ -6,7 +6,7 @@ use rand::distributions::{IndependentSample, Range};
 pub struct HyperParameters {
     alpha: f64,
     gamma: f64,
-    theta: [f64; 4],
+    theta: [f64; 5],
     a_par: f64,
     noise_var: f64,
 }
@@ -16,7 +16,7 @@ impl Default for HyperParameters {
         HyperParameters {
             alpha: 0.7,
             gamma: 0.101,
-            theta: [0.0; 4],
+            theta: [6.826, 3.310, 3.472, 0.0, 1.959],
             a_par: 0.7,
             noise_var: 1.8,
         }
@@ -44,14 +44,14 @@ pub struct Spsa {
     k: f64,
     alpha: f64,
     gamma: f64,
-    theta: [f64; 4],
+    theta: [f64; 5],
     a_par: f64,
     noise_var: f64,
 }
 
 impl Spsa {
     pub fn step<F>(&mut self, loss: &mut F)
-        where F: FnMut([f64; 4]) -> f64
+        where F: FnMut([f64; 5]) -> f64
     {
         let _old_theta = self.theta;
 
@@ -59,23 +59,23 @@ impl Spsa {
         let ak = self.a_par / (self.k + 1.0 + 100.0).powf(self.alpha);
         let ck = self.noise_var / (self.k + 1.0).powf(self.gamma);
 
-        let mut ghat = [0.0; 4];
+        let mut ghat = [0.0; 5];
 
         let ens_size = 3;
         let range = Range::new(-4, 5);
-        let mut delta = [0.0; 4];
+        let mut delta = [0.0; 5];
 
         let mut byte_guess = 0.0;
 
         for _ in 0..ens_size {
 
-            for i in 0..4 {
+            for i in 0..5 {
                 delta[i] = ck * f64::from(range.ind_sample(&mut self.rng));
             }
 
             let mut theta_plus = self.theta;
             let mut theta_minus = self.theta;
-            for i in 0..4 {
+            for i in 0..5 {
                 theta_plus[i] += delta[i];
                 theta_minus[i] -= delta[i];
             }
@@ -85,14 +85,14 @@ impl Spsa {
 
             byte_guess += j_plus + j_minus;
 
-            for i in 0..4 {
+            for i in 0..5 {
                 if delta[i] != 0.0 {
                     ghat[i] += (j_plus - j_minus) / (2.0 * delta[i]);
                 }
             }
         }
 
-        for i in 0..4 {
+        for i in 0..5 {
             self.theta[i] -= ak * ghat[i];
         }
 
@@ -112,7 +112,7 @@ impl Spsa {
         self.k += 1.0;
     }
 
-    pub fn theta(&self) -> [f64; 4] {
+    pub fn theta(&self) -> [f64; 5] {
         self.theta
     }
 }
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let mut loss = |x: [f64; 4]| {
+        let mut loss = |x: [f64; 5]| {
             x[0].powi(2) +
             x[1].powi(2) +
             x[2].powi(2) +

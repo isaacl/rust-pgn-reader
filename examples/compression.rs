@@ -29,11 +29,11 @@ struct Histogram {
     counts: [u64; 256],
     pos: Chess,
     skip: bool,
-    theta: [f64; 4]
+    theta: [f64; 5]
 }
 
 impl Histogram {
-    fn new(theta: [f64; 4]) -> Histogram {
+    fn new(theta: [f64; 5]) -> Histogram {
         Histogram {
             counts: [0; 256],
             pos: Chess::default(),
@@ -113,14 +113,17 @@ impl<'pgn> Visitor<'pgn> for Histogram {
             self.pos.legal_moves(&mut legals);
 
             let mut augmented: ArrayVec<[(&Move, (_)); 512]> = legals.iter().map(|m| {
-                let mval = move_value(self.pos.turn(), m) as f64 / 128.0;
+                let dval = dest_value(self.pos.turn(), m) as f64 / 128.0;
+                let sval = src_value(self.pos.turn(), m) as f64 / 128.0;
+
                 let score =
                     //self.theta[0] * poor_mans_see(&self.pos, m.from().expect("no drops")) * (role_value(m.role()) - 0.5) +
                     // self.theta[0] * m.capture().map_or(0.0, |r| role_value(r) * piece_value(r.of(!self.pos.turn()), m.to()) as f64 / 1000.0) +
                     self.theta[0] * (m.capture().map_or(0.0, role_value) + m.promotion().map_or(0.0, promote_value)) +
                     self.theta[1] * poor_mans_see(&self.pos, m.to()) * (0.5 - role_value(m.role())) +
-                    self.theta[2] * mval +
-                    self.theta[3] * mval * mval +
+                    self.theta[2] * dval +
+                    self.theta[3] * dval * sval +
+                    self.theta[4] * (if m.is_castle() { 50.0 } else { 0.0 }) +
                     (u32::from(m.to()) as f64 / 1024.0) +
                     (u32::from(m.from().expect("no drops")) as f64 / 1024.0);
                 (m, score)
@@ -146,15 +149,24 @@ impl<'pgn> Visitor<'pgn> for Histogram {
     fn end_game(&mut self, _game: &'pgn [u8]) { }
 }
 
-fn piece_value(piece: Piece, square: Square) -> i16 {
-    let sq = if piece.color.is_white() { square } else { square.flip_vertical() };
-    PSQT[piece.role as usize][usize::from(sq)] as i16
+fn dest_value(turn: Color, m: &Move) -> i16 {
+    let sq = if turn.is_white() { m.to().flip_vertical() } else { m.to() };
+    DEST_PROB[m.role() as usize][sq as usize] as i16
 }
 
-fn move_value(turn: Color, m: &Move) -> i16 {
-    let piece = m.role().of(turn);
-    piece_value(piece, m.to()) // - piece_value(piece, m.from().expect("no drops"))
+fn src_value(turn: Color, m: &Move) -> i16 {
+    let sq = if turn.is_white() { m.from().unwrap().flip_vertical() } else { m.from().unwrap() };
+    SRC_PROB[m.role() as usize][sq as usize] as i16
 }
+// fn piece_value(piece: Piece, square: Square) -> i16 {
+//     let sq = if piece.color.is_white() { square.flip_vertical() } else { square };
+//     PSQT[piece.role as usize][usize::from(sq)] as i16
+// }
+//
+// fn move_value(turn: Color, m: &Move) -> i16 {
+//     let piece = m.role().of(turn);
+//     piece_value(piece, m.to()) - piece_value(piece, m.from().expect("no drops"))
+// }
 
 fn poor_mans_see(pos: &Chess, sq: Square) -> f64 {
     if (shakmaty::attacks::pawn_attacks(pos.turn(), sq) & pos.board().pawns() & pos.them()).any() {
@@ -164,7 +176,7 @@ fn poor_mans_see(pos: &Chess, sq: Square) -> f64 {
     }
 }
 
-static PSQT: [[u16; 64]; 6] = [
+static DEST_PROB: [[u16; 64]; 6] = [
 [ 195, 196, 168, 173, 191, 213, 247, 229,
   379, 356, 284, 227, 254, 343, 365, 370,
    28,  29,  68,  76,  62,  39,  20,  13,
@@ -210,14 +222,70 @@ static PSQT: [[u16; 64]; 6] = [
    12,  26,  86,  70, 103,  34,  28,   8,
    22,  16,  25,  44,  37,  28,  11,  10],
 
-[   2,   3,   4,   1,   2,   0,   1,   0,
+[   4,   3,   4,   1,   2,   0,   1,   0,
    24,  27,  14,   1,   1,   3,   5,   2,
    51,  59,  48,  33,  26,  24,  23,  16,
    83, 115, 106,  94,  89,  85,  86,  60,
   109, 154, 165, 174, 185, 201, 195, 134,
   136, 217, 224, 246, 271, 303, 312, 217,
   168, 250, 261, 127, 148, 281, 406, 283,
-  525, 283, 176,  99, 171, 101, 208, 494]
+  144, 283, 176,  99, 171, 101, 208, 160]
+];
+
+static SRC_PROB: [[u16; 64]; 6] = [
+[   0,   0,   0,   0,   0,   0,   0,   0,
+    2,   2,   4,   5,   4,   1,   1,   1,
+   48,  53,  43,  44,  36,  56,  29,  30,
+  136,  91,  67,  86,  82,  90, 105, 149,
+  106,  82,  97, 104, 133, 101, 112, 130,
+   32,  38,  62,  65,  61,  78,  32,  32,
+   16,  21,  55, 137, 184,  33,  21,  20,
+    0,   0,   0,   0,   0,   0,   0,   0],
+
+[ 104,   0,  73,  60,  35,  33,   0, 111,
+  108, 112,  83,   6,  12,  77,  82,  41,
+   26,  25,   3,  51,  51,   1,  22,  35,
+   39,  86,  36,  35,  41,  39,  73,  45,
+   95,  22,  45,  42,  41,  42,  26,  97,
+   75,  50,  32,  40,  47,  37,  47,  81,
+   72,  62,  48,  67,  71,  46,  68,  90,
+   44, 103, 108, 119, 117, 105, 204,  65],
+
+[  51,  24,   0,  23,  26,   0,  53,  46,
+   22,   6,  17,   3,   2,  34,   2,  36,
+   21,   8,  20,   3,   4,  11,  11,  48,
+   33,  84,   4,  33,  30,   6,  85,  34,
+   86,  12,  47,  29,  35,  51,  10,  88,
+   50,  42,  38,  36,  43,  48,  44,  35,
+   34,  45,  35,  58,  60,  36,  38,  36,
+   42,  42, 109,  83,  83, 206,  45,  43],
+
+[   1,   6,   4,   2,   2,   1,   6,   1,
+   55,  55,  46,  35,  34,  33,  51,  59,
+   57,  48,  47,  39,  34,  30,  34,  48,
+   50,  50,  46,  39,  40,  38,  45,  48,
+   36,  33,  32,  37,  38,  43,  42,  39,
+   26,  31,  31,  37,  46,  54,  45,  35,
+   18,  18,  26,  36,  40,  43,  29,  22,
+   61,  54,  55,  59,  60,  86,  58,  44],
+
+[  52,  31,  21,   0,  18,  25,  58,  92,
+   63,  41,   4,   4,   3,  24,  29,  71,
+   41,   4,  17,   6,  13,   4,  12,  35,
+    8,  38,  15,  19,  20,  22,  16,  53,
+   69,  23,  41,  36,  36,  32,  47,  16,
+   22,  83,  38,  60,  43,  77,  55,  26,
+   13,  19,  73,  82,  93,  35,  32,  14,
+   21,  36,  52, 148,  59,  47,  17,   9],
+
+[  22,   3,   1,   4,   0,   2,   0,   1,
+   39,  18,  12,   7,   5,   4,   2,   4,
+  102,  45,  40,  29,  21,  20,  19,  34,
+  153,  91,  86,  77,  72,  70,  70, 115,
+  178, 111, 134, 150, 159, 155, 137, 205,
+  205, 148, 187, 219, 234, 234, 212, 299,
+  216, 176, 221, 245, 252, 245, 235, 277,
+  385, 328, 406, 362,  63, 427, 310, 416]
 ];
 
 fn main() {
@@ -234,7 +302,7 @@ fn main() {
 
     let mut next_pgn = pgn;
 
-    // let mut histogram = Histogram::new([6.544, 3.085, 3.703, 1.801]);
+    // let mut histogram = Histogram::new([6.826, 3.310, 3.472, 0.0, 10.959]);
     // let games = 100000;
     // {
     //     let mut reader = Reader::new(&mut histogram, pgn);

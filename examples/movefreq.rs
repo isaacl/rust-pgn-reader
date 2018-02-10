@@ -97,7 +97,7 @@ impl<'pgn> Visitor<'pgn> for Counter {
 
             let ignore = legals.len() == 1;
 
-            let mut found = false;
+            let mut move_match: Option<Move> = None;
 
             for m in legals {
                 let dest = self.fix_sq(m.to()) as usize;
@@ -109,26 +109,30 @@ impl<'pgn> Visitor<'pgn> for Counter {
                     self.s_avail[role][src] += 1;
                 }
                 if san.matches(&m) {
-                    if found {
-                        eprintln!("illegal san: {}, dupe move", san);
-                        self.skip = true;
-                        return;
-                    } else {
-                        found = true;
-                        if !ignore && !m.is_castle() {
-                            self.hits[role][dest] += 1;
-                            self.s_hits[role][src] += 1;
+                    match move_match {
+                        Some(_) => {
+                            eprintln!("illegal san: {}, dupe move", san);
+                            self.skip = true;
+                            return;
                         }
-                        self.pos.play_unchecked(&m);
+                        None => {
+                            if !ignore && !m.is_castle() {
+                                self.hits[role][dest] += 1;
+                                self.s_hits[role][src] += 1;
+                            }
+                            move_match = Some(m);
+                        }
                     }
                 }
-
             }
 
-            if !found {
-                eprintln!("illegal san: {}, not found", san);
-                self.skip = true;
-                return;
+            match move_match {
+                Some(m) => { self.pos.play_unchecked(&m) }
+                None => {
+                    eprintln!("illegal san: {}, not found", san);
+                    self.skip = true;
+                    return;
+                }
             }
         }
     }
@@ -147,7 +151,7 @@ fn main() {
     let mut counter = Counter::new();
     {
         let mut reader = Reader::new(&mut counter, pgn);
-        for _k in 0..1000000 {
+        for _k in 0..10000 {
             reader.read_game();
         }
     }

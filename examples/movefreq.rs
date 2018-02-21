@@ -151,7 +151,7 @@ fn main() {
     let mut counter = Counter::new();
     {
         let mut reader = Reader::new(&mut counter, pgn);
-        for _k in 0..10000 {
+        for _k in 0..1000000 {
             reader.read_game();
         }
     }
